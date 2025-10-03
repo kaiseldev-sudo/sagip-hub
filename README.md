@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Relief Hub — Philippines Disaster Relief Heatmap
+
+A Next.js app to visualize disaster relief help requests across the Philippines. It features a heatmap and location markers by urgency level, a submission form for new requests, and a responsive UI optimized for fast access during emergencies.
+
+### Features
+- Visual, interactive heatmap of help requests with urgency-based intensities
+- Custom map markers with popovers (title, type, people affected, contact)
+- Submit and view requests tabs
+- Responsive header, navbar, and map container
+- Client-side only map using Leaflet and leaflet.heat
+
+### Tech Stack
+- Next.js (App Router) + TypeScript
+- Tailwind CSS
+- Leaflet + leaflet.heat (dynamically imported)
+- lucide-react icons
+- Sonner toasts
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+- Node.js 18+ and npm
 
+### Installation
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Development
+```bash
+npm run dev
+```
+Open `http://localhost:3000` in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Useful scripts:
+- `npm run dev` — start dev server
+- `npm run build` — production build
+- `npm run start` — run production build
+- `npm run lint` — lint check
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Project Structure
+- `app/` — Next.js app routes and layout
+- `components/` — UI and feature components (heatmap, list, form)
+- `hooks/` — reusable hooks (e.g., toast)
+- `lib/` — utilities
 
-## Learn More
+## Notes on the Map
+- Leaflet CSS is injected once on the client; the map and heat layer are dynamically imported to avoid SSR issues.
+- The map automatically resizes using `ResizeObserver` with a window resize fallback.
+- Fit bounds padding adjusts based on viewport for better framing on small screens.
 
-To learn more about Next.js, take a look at the following resources:
+## Accessibility & Responsiveness
+- Header and navigation adapt to mobile with a hamburger menu and accessible button states.
+- The heatmap container height scales by breakpoint to keep the map usable on phones and desktops.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security & Data
+- Consider a hybrid access model: public read-only heatmap, authenticated submissions, and an admin/moderation area. Add CAPTCHA and rate limiting if keeping submissions public.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deployment
+- Recommended: Vercel. Build command: `npm run build`, output: `.next`.
+- Ensure `NEXT_TELEMETRY_DISABLED=1` if you prefer disabling telemetry.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Contributing
+Issues and PRs are welcome. Please run `npm run lint` before submitting changes.
