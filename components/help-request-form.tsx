@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -38,13 +38,57 @@ export function HelpRequestForm({ onSubmit }: HelpRequestFormProps) {
     urgency: "",
     peopleAffected: "1",
   })
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null)
+  const turnstileWidgetIdRef = useRef<string | null>(null)
+
+  // Render Cloudflare Turnstile widget programmatically to avoid invalid data-callback prop
+  useEffect(() => {
+    let cancelled = false
+
+    const tryRender = () => {
+      const w = window as any
+      if (!turnstileContainerRef.current || !w || !w.turnstile) return false
+      if (turnstileWidgetIdRef.current && w.turnstile.reset) {
+        try {
+          w.turnstile.reset(turnstileWidgetIdRef.current)
+        } catch {}
+      }
+      turnstileWidgetIdRef.current = w.turnstile.render(turnstileContainerRef.current, {
+        sitekey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
+        callback: (token: string) => setTurnstileToken(token),
+        "error-callback": () => setTurnstileToken(null),
+        "expired-callback": () => setTurnstileToken(null),
+        theme: "auto",
+      })
+      return true
+    }
+
+    // Poll until the script is loaded
+    const interval = setInterval(() => {
+      if (cancelled) return
+      if (tryRender()) {
+        clearInterval(interval)
+      }
+    }, 200)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+      const w = window as any
+      if (w && w.turnstile && turnstileWidgetIdRef.current && w.turnstile.remove) {
+        try {
+          w.turnstile.remove(turnstileWidgetIdRef.current)
+        } catch {}
+      }
+      turnstileWidgetIdRef.current = null
+    }
+  }, [])
 
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
-      toast({
-        title: "Geolocation not supported",
+      toast.error("Geolocation not supported", {
         description: "Your browser does not support geolocation.",
-        variant: "destructive",
       })
       return
     }
@@ -58,23 +102,20 @@ export function HelpRequestForm({ onSubmit }: HelpRequestFormProps) {
           longitude: position.coords.longitude.toFixed(6),
         })
         setIsLoadingLocation(false)
-        toast({
-          title: "Location obtained",
+        toast("Location obtained", {
           description: "Your coordinates have been filled in.",
         })
       },
       (error) => {
         setIsLoadingLocation(false)
-        toast({
-          title: "Location error",
+        toast.error("Location error", {
           description: "Unable to get your location. Please enter manually.",
-          variant: "destructive",
         })
       },
     )
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (
@@ -86,41 +127,75 @@ export function HelpRequestForm({ onSubmit }: HelpRequestFormProps) {
       !formData.requestType ||
       !formData.urgency
     ) {
-      toast({
-        title: "Missing information",
+      toast.error("Missing information", {
         description: "Please fill in all required fields.",
-        variant: "destructive",
       })
       return
     }
 
-    onSubmit({
-      title: formData.title,
-      description: formData.description,
-      latitude: Number.parseFloat(formData.latitude),
-      longitude: Number.parseFloat(formData.longitude),
-      contactNumber: formData.contactNumber,
-      requestType: formData.requestType,
-      urgency: formData.urgency,
-      peopleAffected: Number.parseInt(formData.peopleAffected) || 1,
-    })
+    if (!turnstileToken) {
+      toast.error("Verification required", {
+        description: "Please complete the verification challenge before submitting.",
+      })
+      return
+    }
 
-    // Reset form
-    setFormData({
-      title: "",
-      description: "",
-      latitude: "",
-      longitude: "",
-      contactNumber: "",
-      requestType: "",
-      urgency: "",
-      peopleAffected: "1",
-    })
+    // Verify Turnstile token server-side
+    try {
+      const verifyRes = await fetch("/api/verify-turnstile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: turnstileToken }),
+      })
 
-    toast({
-      title: "Request submitted",
-      description: "Your help request has been recorded. Assistance is on the way.",
-    })
+      if (!verifyRes.ok) {
+        throw new Error("Verification failed")
+      }
+
+      const verifyJson = (await verifyRes.json()) as { success: boolean }
+      if (!verifyJson.success) {
+        throw new Error("Verification failed")
+      }
+    } catch (_) {
+      toast.error("Verification failed", {
+        description: "Please retry the verification challenge.",
+      })
+      return
+    }
+
+    try {
+      await onSubmit({
+        title: formData.title,
+        description: formData.description,
+        latitude: Number.parseFloat(formData.latitude),
+        longitude: Number.parseFloat(formData.longitude),
+        contactNumber: formData.contactNumber,
+        requestType: formData.requestType,
+        urgency: formData.urgency,
+        peopleAffected: Number.parseInt(formData.peopleAffected) || 1,
+      })
+
+      // Reset form
+      setFormData({
+        title: "",
+        description: "",
+        latitude: "",
+        longitude: "",
+        contactNumber: "",
+        requestType: "",
+        urgency: "",
+        peopleAffected: "1",
+      })
+
+      toast.success("Request submitted", {
+        description: "Your help request has been recorded.",
+      })
+    } catch (err: any) {
+      const message = err?.message || "Submission failed"
+      toast.error("Submission failed", {
+        description: message,
+      })
+    }
   }
 
   return (
@@ -288,6 +363,11 @@ export function HelpRequestForm({ onSubmit }: HelpRequestFormProps) {
               onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
               required
             />
+          </div>
+
+          {/* Cloudflare Turnstile widget */}
+          <div className="mt-2 flex w-full justify-center">
+            <div ref={turnstileContainerRef} />
           </div>
 
           <Button type="submit" size="lg" className="w-full">

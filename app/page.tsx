@@ -1,10 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import Image from "next/image"
 import { HelpRequestForm } from "@/components/help-request-form"
 import { HelpRequestsList } from "@/components/help-requests-list"
 import { HelpRequestsHeatmap } from "@/components/help-requests-heatmap"
 import { AlertTriangle } from "lucide-react"
+import logoTransparent from "@/lib/logo-transparent.png"
+import { apiCreateRequest, apiListRequests, type ApiRequest, type ApiRequestCreate } from "@/lib/api"
 
 export interface HelpRequest {
   id: string
@@ -23,24 +26,118 @@ export default function Home() {
   const [requests, setRequests] = useState<HelpRequest[]>([])
   const [activeTab, setActiveTab] = useState<"heatmap" | "submit" | "view">("heatmap")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isScrolled, setIsScrolled] = useState(false)
+  const pollingRef = useRef<number | null>(null)
 
-  const handleSubmitRequest = (request: Omit<HelpRequest, "id" | "timestamp">) => {
-    const newRequest: HelpRequest = {
-      ...request,
-      id: Math.random().toString(36).substring(7),
-      timestamp: new Date(),
+  useEffect(() => {
+    const onScroll = () => {
+      setIsScrolled(window.scrollY > 8)
     }
-    setRequests([newRequest, ...requests])
-    setActiveTab("view")
+    onScroll()
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [])
+
+  // Map backend API request to UI HelpRequest
+  const mapApiToHelpRequest = (r: ApiRequest): HelpRequest => ({
+    id: r.public_id,
+    title: r.title,
+    description: r.description,
+    latitude: Number(r.latitude),
+    longitude: Number(r.longitude),
+    contactNumber: r.contact_number,
+    requestType: r.request_type,
+    urgency: r.urgency,
+    peopleAffected: Number(r.people_affected),
+    timestamp: new Date(r.created_at),
+  })
+
+  // Initial load of requests
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiListRequests({ page: 1, per_page: 50 })
+        const list = Array.isArray(res) ? res : res?.data ?? []
+        if (!cancelled) setRequests(list.map(mapApiToHelpRequest))
+      } catch (_) {
+        // swallow for now; UI will show empty state
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Realtime polling for View Requests page
+  useEffect(() => {
+    const mergeById = (current: HelpRequest[], incoming: HelpRequest[]) => {
+      const byId = new Map<string, HelpRequest>()
+      current.forEach((r) => byId.set(r.id, r))
+      incoming.forEach((r) => byId.set(r.id, r))
+      const merged = Array.from(byId.values())
+      merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      return merged
+    }
+
+    const tick = async () => {
+      try {
+        const res = await apiListRequests({ page: 1, per_page: 50 })
+        const list = Array.isArray(res) ? res : res?.data ?? []
+        const mapped = list.map(mapApiToHelpRequest)
+        setRequests((prev) => mergeById(prev, mapped))
+      } catch {}
+    }
+
+    // start interval
+    if (pollingRef.current) window.clearInterval(pollingRef.current)
+    pollingRef.current = window.setInterval(tick, 15000)
+    // run immediately once
+    tick()
+    return () => {
+      if (pollingRef.current) {
+        window.clearInterval(pollingRef.current)
+        pollingRef.current = null
+      }
+    }
+  }, [])
+
+  const handleSubmitRequest = async (
+    request: Omit<HelpRequest, "id" | "timestamp">
+  ) => {
+    try {
+      const payload: ApiRequestCreate = {
+        title: request.title,
+        description: request.description,
+        latitude: request.latitude,
+        longitude: request.longitude,
+        contactNumber: request.contactNumber,
+        requestType: request.requestType,
+        urgency: request.urgency,
+        peopleAffected: request.peopleAffected,
+      }
+      const created = await apiCreateRequest(payload)
+      const createdRequest = mapApiToHelpRequest(created.request)
+      setRequests((prev) => [createdRequest, ...prev])
+      setActiveTab("view")
+    } catch (_) {
+      // Let the form toast success/failure; keep silent here
+    }
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card">
+      <header
+        className={`fixed inset-x-0 top-0 z-50 border-b transition-all ${
+          isScrolled
+            ? "bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60 border-border shadow-sm"
+            : "bg-transparent border-transparent"
+        }`}
+      >
         <div className="container mx-auto flex items-end justify-between px-4 py-2 sm:px-6 lg:px-16">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
-              <AlertTriangle className="h-6 w-6 text-primary-foreground" />
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg">
+              <Image src={logoTransparent} alt="SagipHub logo" width={48} height={48} priority />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-balance">SagipHub</h1>
@@ -193,7 +290,7 @@ export default function Home() {
         )}
       </header>
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-4 pt-20 md:pt-24 pb-8">
         {activeTab === "heatmap" ? (
           <HelpRequestsHeatmap requests={requests} />
         ) : activeTab === "submit" ? (

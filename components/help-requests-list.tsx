@@ -53,7 +53,7 @@ export function HelpRequestsList({ requests }: HelpRequestsListProps) {
   if (requests.length === 0) {
     return (
       <Card className="mx-auto max-w-3xl">
-        <CardContent className="flex flex-col items-center justify-center py-16">
+        <CardContent className="flex flex-col items-center justify-center py-8 md:py-12">
           <AlertCircle className="mb-4 h-12 w-12 text-muted-foreground" />
           <h3 className="mb-2 text-lg font-semibold">No requests yet</h3>
           <p className="text-center text-muted-foreground">Submit a help request to see it appear here.</p>
@@ -63,7 +63,7 @@ export function HelpRequestsList({ requests }: HelpRequestsListProps) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
+    <div className="mx-auto max-w-7xl space-y-4">
       <div className="mb-6">
         <h2 className="text-2xl font-bold">Active Help Requests</h2>
         <p className="text-muted-foreground">

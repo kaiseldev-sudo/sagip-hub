@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import type { HelpRequest } from "@/app/page"
+import { apiListRequests, type ApiRequest } from "@/lib/api"
 
 interface HelpRequestsHeatmapProps {
   requests: HelpRequest[]
@@ -14,6 +15,8 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
   const heatLayerRef = useRef<any>(null)
   const markersRef = useRef<any[]>([])
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  const [liveRequests, setLiveRequests] = useState<HelpRequest[] | null>(null)
+  const pollingRef = useRef<number | null>(null)
 
   useEffect(() => {
     // Only run on client side
@@ -72,17 +75,6 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
         }
       }
 
-      // Remove existing markers
-      markersRef.current.forEach((marker) => {
-        mapInstanceRef.current.removeLayer(marker)
-      })
-      markersRef.current = []
-
-      // Remove existing heat layer if any
-      if (heatLayerRef.current) {
-        mapInstanceRef.current.removeLayer(heatLayerRef.current)
-      }
-
       const createCustomIcon = (urgency: string) => {
         let color = "#3b82f6"
         switch (urgency) {
@@ -127,9 +119,34 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
         return [48, 48] // xl+
       }
 
-      // Create heat layer data
-      if (requests.length > 0) {
-        const heatData = requests.map((request) => {
+      const renderData = (data: HelpRequest[]) => {
+        if (!mapInstanceRef.current) return
+        // Remove existing markers
+        if (markersRef.current && markersRef.current.length > 0) {
+          markersRef.current.forEach((marker) => {
+            try {
+              mapInstanceRef.current?.removeLayer(marker)
+            } catch {}
+          })
+        }
+        markersRef.current = []
+
+        // Remove existing heat layer if any
+        if (heatLayerRef.current && mapInstanceRef.current) {
+          try {
+            mapInstanceRef.current.removeLayer(heatLayerRef.current)
+          } catch {}
+        }
+
+        if (data.length === 0) {
+          const philippinesCenter: [number, number] = [12.8797, 122.774]
+          try {
+            mapInstanceRef.current.setView(philippinesCenter, 6)
+          } catch {}
+          return
+        }
+
+        const heatData = data.map((request) => {
           // Intensity based on urgency
           let intensity = 0.5
           switch (request.urgency) {
@@ -167,11 +184,9 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
           })
           .addTo(mapInstanceRef.current)
 
-        // Fit map to show all points
-        const bounds = L.latLngBounds(requests.map((r) => [r.latitude, r.longitude] as [number, number]))
-        mapInstanceRef.current.fitBounds(bounds, { padding: getResponsivePadding() })
+        // Keep the map view fixed to the Philippines; do not auto-fit to points
 
-        requests.forEach((request) => {
+        data.forEach((request) => {
           const customIcon = createCustomIcon(request.urgency)
           const marker = L.marker([request.latitude, request.longitude], { icon: customIcon })
 
@@ -192,21 +207,77 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
               </span>
             </div>
           `)
-          marker.addTo(mapInstanceRef.current)
+          try {
+            marker.addTo(mapInstanceRef.current)
+          } catch {}
           markersRef.current.push(marker)
         })
-      } else {
-        const philippinesCenter: [number, number] = [12.8797, 122.774]
-        mapInstanceRef.current.setView(philippinesCenter, 6)
       }
+
+      const mapApiToHelpRequest = (r: ApiRequest): HelpRequest => ({
+        id: r.public_id,
+        title: r.title,
+        description: r.description,
+        latitude: Number(r.latitude),
+        longitude: Number(r.longitude),
+        contactNumber: r.contact_number,
+        requestType: r.request_type,
+        urgency: r.urgency,
+        peopleAffected: Number(r.people_affected),
+        timestamp: new Date(r.created_at),
+      })
+
+      const fetchWithinBounds = async () => {
+        if (!mapInstanceRef.current) return
+        const bounds = mapInstanceRef.current.getBounds()
+        const sw = bounds.getSouthWest()
+        const ne = bounds.getNorthEast()
+        try {
+          const res = await apiListRequests({
+            page: 1,
+            per_page: 200,
+            bbox: [sw.lng, sw.lat, ne.lng, ne.lat],
+          })
+          const list = Array.isArray(res) ? res : res?.data ?? []
+          const mapped = list.map(mapApiToHelpRequest)
+          setLiveRequests(mapped)
+          renderData(mapped)
+        } catch {
+          // fallback to props
+          renderData(requests)
+        }
+      }
+
+      // Initial render via API
+      await fetchWithinBounds()
+
+      // Refresh on moveend/zoomend
+      try {
+        mapInstanceRef.current.on("moveend", fetchWithinBounds)
+        mapInstanceRef.current.on("zoomend", fetchWithinBounds)
+      } catch {}
+
+      // Polling every 15 seconds
+      if (pollingRef.current) window.clearInterval(pollingRef.current)
+      pollingRef.current = window.setInterval(fetchWithinBounds, 15000)
     }
 
     initMap()
 
     // Cleanup
     return () => {
+      if (pollingRef.current) {
+        window.clearInterval(pollingRef.current)
+        pollingRef.current = null
+      }
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove()
+        try {
+          mapInstanceRef.current.off("moveend")
+          mapInstanceRef.current.off("zoomend")
+        } catch {}
+        try {
+          mapInstanceRef.current.remove()
+        } catch {}
         mapInstanceRef.current = null
       }
       if (resizeObserverRef.current) {
@@ -216,7 +287,7 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
         resizeObserverRef.current = null
       }
     }
-  }, [requests])
+  }, [])
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -232,7 +303,7 @@ export function HelpRequestsHeatmap({ requests }: HelpRequestsHeatmapProps) {
         <CardContent>
           <div
             ref={mapRef}
-            className="w-full rounded-lg border border-border h-[320px] sm:h-[420px] md:h-[520px] lg:h-[600px]"
+            className="w-full rounded-lg border border-border h-[320px] sm:h-[420px] md:h-[520px] lg:h-[600px] z-0"
           />
           {requests.length > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs sm:gap-4 sm:text-sm">
