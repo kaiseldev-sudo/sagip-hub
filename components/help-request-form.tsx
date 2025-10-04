@@ -187,9 +187,8 @@ export function HelpRequestForm({ onSubmit }: HelpRequestFormProps) {
         peopleAffected: "1",
       })
 
-      toast.success("Request submitted", {
-        description: "Your help request has been recorded.",
-      })
+      // Don't show success toast here since we're redirecting
+      // The redirect will happen in the parent component
     } catch (err: any) {
       const message = err?.message || "Submission failed"
       toast.error("Submission failed", {

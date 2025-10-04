@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { HelpRequestForm } from "@/components/help-request-form"
 import { HelpRequestsList } from "@/components/help-requests-list"
@@ -23,6 +24,7 @@ export interface HelpRequest {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [requests, setRequests] = useState<HelpRequest[]>([])
   const [activeTab, setActiveTab] = useState<"heatmap" | "submit" | "view">("heatmap")
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -116,12 +118,37 @@ export default function Home() {
         urgency: request.urgency,
         peopleAffected: request.peopleAffected,
       }
+      console.log("Creating request with payload:", payload)
       const created = await apiCreateRequest(payload)
-      const createdRequest = mapApiToHelpRequest(created.request)
+      console.log("Request created successfully:", created)
+      
+      // Handle the actual API response structure
+      const requestData = created.request || created
+      const createdRequest = mapApiToHelpRequest(requestData)
+
+      // Persist manage info locally for this device
+      try {
+        const arr = (JSON.parse(localStorage.getItem("my_requests") || "[]") as { public_id: string; edit_token?: string }[])
+        arr.unshift({ public_id: requestData.public_id, edit_token: created.edit_token })
+        localStorage.setItem("my_requests", JSON.stringify(arr.slice(0, 20)))
+      } catch {}
+
+      // Redirect to confirmation/manage page with credentials in query (immediately)
+      const url = new URL(window.location.origin + "/manage")
+      url.searchParams.set("public_id", requestData.public_id)
+      if (created.edit_token) url.searchParams.set("edit_token", created.edit_token)
+      console.log("Redirecting to:", url.toString())
+      window.location.replace(url.toString())
+      return
+
+      // Fallback UI update (unlikely to run if redirect succeeds)
       setRequests((prev) => [createdRequest, ...prev])
       setActiveTab("view")
-    } catch (_) {
-      // Let the form toast success/failure; keep silent here
+    } catch (error) {
+      // Log the error for debugging
+      console.error("Error creating request:", error)
+      // Re-throw the error so the form can handle it with toast
+      throw error
     }
   }
 
@@ -180,6 +207,14 @@ export default function Home() {
                   }`}
                 >
                   Submit Request
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/manage"
+                  className={`block px-1 pb-3 pt-2 font-medium transition-colors text-muted-foreground hover:text-foreground`}
+                >
+                  My Requests
                 </a>
               </li>
               <li>
@@ -260,6 +295,14 @@ export default function Home() {
                   }`}
                 >
                   Submit Request
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/manage"
+                  className={`block rounded-md px-3 py-2 font-medium transition-colors text-muted-foreground hover:bg-accent hover:text-foreground`}
+                >
+                  My Requests
                 </a>
               </li>
               <li>
